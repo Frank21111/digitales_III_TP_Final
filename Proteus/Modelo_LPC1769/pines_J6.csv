@@ -1,0 +1,55 @@
+pin_J6,nombre_en_Proteus,tipo_de_pin,rotulo_en_la_placa,funciones,uso_en_el_TPI
+1,GND,Power,GNDX,Masa (GND_CTRL),
+2,EXT_POW,Passive,EXT_POWX,Entrada de 5 V de la placa,No se usa en el TPI
+3,VB,Passive,VB,Batería del RTC,No se usa
+4,RESET_N,Input,RESET_N,Reset activo en bajo,Opcional: pulsador a GND reinicia el modelo
+5,P0.9,IO,P0[9],MOSI1 / MAT2.3,
+6,P0.8,IO,P0[8],MISO1 / MAT2.2,
+7,P0.7,IO,P0[7],SCK1 / MAT2.1,
+8,P0.6,IO,P0[6],SSEL1 / MAT2.0,
+9,P0.0,IO,P0[0],TXD3,
+10,P0.1,IO,P0[1],RXD3,
+11,P0.18,IO,P0[18],MOSI0,
+12,P0.17,IO,P0[17],MISO0,
+13,P0.15,IO,P0[15],TXD1 / SCK0,
+14,P0.16,IO,P0[16],RXD1 / SSEL0,
+15,P0.23,IO (analógico),P0[23],AD0.0 / CAP3.0,TPI: LM35 (vía RC 1 kΩ / 1 µF)
+16,P0.24,IO (analógico),P0[24],AD0.1 / CAP3.1,
+17,P0.25,IO (analógico),P0[25],AD0.2 / TXD3,
+18,P0.26,IO (analógico),P0[26],AD0.3 / AOUT / RXD3,
+19,P1.30,IO (analógico),P1[30],AD0.4,
+20,P1.31,IO (analógico),P1[31],AD0.5,
+21,P0.2,IO,P0[2],TXD0 / AD0.7,TPI: TXD0 hacia la PC (RXD de COMPIM o Virtual Terminal)
+22,P0.3,IO,P0[3],RXD0 / AD0.6,TPI: RXD0 desde la PC (TXD de COMPIM o Virtual Terminal)
+23,P0.21,IO,P0[21],GPIO,
+24,P0.22,IO,P0[22],GPIO (LED de la placa),TPI: LED de alarma (vía 2N2222A)
+25,P0.27,IO,P0[27],"SDA0 (drenador abierto, sin pull-up)",
+26,P0.28,IO,P0[28],"SCL0 (drenador abierto, sin pull-up)",
+27,P2.13,IO,P0[13] en el esquemático,EINT3,El LPC176x no tiene P0.13: es P2.13
+28,VDD,Power,VIO3V3X,"Salida de 3,3 V de la placa",Conectar a +3V3
+29,NC1,Passive,NC,Sin conexión,
+30,NC2,Passive,NC,Sin conexión,
+31,NC3,Passive,NC,Sin conexión,
+32,RD-,Passive,RD-,Ethernet,No modelado
+33,RD+,Passive,RD+,Ethernet,No modelado
+34,TD-,Passive,TD-,Ethernet,No modelado
+35,TD+,Passive,TD+,Ethernet,No modelado
+36,USB_D-,Passive,USB-D-,USB,No modelado
+37,USB_D+,Passive,USB-D+,USB,No modelado
+38,P0.4,IO,P0[4],CAP2.0,TPI: ECHO del HC-SR04 (después del divisor 1 kΩ / 2 kΩ)
+39,P0.5,IO,P0[5],CAP2.1,TPI: TRIG del HC-SR04
+40,P0.10,IO,P0[10],TXD2 / MAT3.0,
+41,P0.11,IO,P0[11],RXD2 / MAT3.1,
+42,P2.0,IO,P2[0],PWM1.1 / TXD1,TPI: PWM de la bomba (PC817 → IRF630)
+43,P2.1,IO,P2[1],PWM1.2 / RXD1,
+44,P2.2,IO,P2[2],PWM1.3,TPI: ventilador (PC817 → IRF630)
+45,P2.3,IO,P2[3],PWM1.4,TPI: buzzer (vía 2N2222A)
+46,P2.4,IO,P2[4],PWM1.5,
+47,P2.5,IO,P2[5],PWM1.6,
+48,P2.6,IO,P2[6],GPIO,
+49,P2.7,IO,P2[7],GPIO,
+50,P2.8,IO,P2[8],TXD2,
+51,P2.10,IO,P2[10],EINT0 (pulsador ISP de la placa),
+52,P2.11,IO,P2[11],EINT1,
+53,P2.12,IO,P2[12],EINT2,
+54,GND,Power,GNDX,Masa (GND_CTRL),
