@@ -3,21 +3,21 @@
 @file     app_nivel.py
 @brief    Aplicación de PC del sistema de control automático de nivel de agua (TPI ED III, G7).
 @details  Se comunica con el LPC1769 por el conversor USB-UART CP2102 (9600 8N1): muestra la
-          telemetría, grafica los últimos 120 s, envía el setpoint (modo AUTO) o un PWM fijo
-          (modo MANUAL) y registra un CSV que procesa identificar.py. Tramas ASCII con fin LF:
-            MCU -> PC cada 500 ms: L=105,SP=120,T=34.5,PWM=42,FAN=0,ALM=0,ERR=0,MODO=A
-            PC -> MCU: SP=<0|30..160> (SP=0 apaga la bomba) y U=<0..100>
+          telemetría, grafica los últimos 120 s y envía el setpoint (modo AUTO), un PWM fijo
+          (modo MANUAL) o los umbrales de la alarma térmica. Tramas ASCII con fin LF:
+            MCU -> PC cada 500 ms:
+              L=105,SP=120,T=34.5,TON=45,TOFF=40,PWM=42,FAN=0,ALM=0,ERR=0,MODO=A
+            PC -> MCU: SP=<0|30..160> (SP=0 apaga la bomba), U=<0..100>,
+                       TON=<30..80> y TOFF=<30..80> (°C, con TOFF < TON)
           Sin hilos: el puerto se lee sin bloquear cada 100 ms con after() de Tkinter.
           Uso: pip install -r requirements.txt   y luego   python app_nivel.py
 @note     SSE.3.1
 """
-import os
 import re
 import time
 import tkinter as tk
 from collections import deque
 from contextlib import suppress
-from datetime import datetime
 from tkinter import ttk
 
 import serial
@@ -25,14 +25,16 @@ from serial.tools import list_ports
 
 BAUDIOS, PERIODO_MS, VENTANA_S, SILENCIO_S, MAX_TRAMA = 9600, 100, 120, 2.0, 200
 PERIODO_TRAMA_S = 0.5  # el firmware envía una trama cada 500 ms (Tick.c, TICKS_TELEMETRIA)
-CARPETA = os.path.dirname(os.path.abspath(__file__))
-CABECERA_CSV = "t_s,L_mm,SP_mm,T_C,PWM_pct,FAN,ALM,ERR,MODO"
-TRAMA = re.compile(r"L=([0-9]{1,3}),SP=([0-9]{1,3}),T=([0-9]{1,3}\.[0-9]),PWM=([0-9]{1,3}),"
-                   r"FAN=([01]),ALM=([01]),ERR=([01]),MODO=([AM])")
+TRAMA = re.compile(r"L=([0-9]{1,3}),SP=([0-9]{1,3}),T=([0-9]{1,3}\.[0-9]),TON=([0-9]{2}),"
+                   r"TOFF=([0-9]{2}),PWM=([0-9]{1,3}),FAN=([01]),ALM=([01]),ERR=([01]),MODO=([AM])")
+T_UMBRAL_MIN, T_UMBRAL_MAX = 30, 80  # rango de TON y TOFF en °C (Control.h)
 MENSAJES = {"SP": "Setpoint inválido: ingrese 0 (detener) o un entero de 30 a 160 mm.",
-            "U": "PWM manual inválido: ingrese un entero de 0 a 100 %."}
+            "U": "PWM manual inválido: ingrese un entero de 0 a 100 %.",
+            "TON": "Umbrales inválidos: enteros de 30 a 80 °C, con T apagado < T encendido.",
+            "TOFF": "Umbrales inválidos: enteros de 30 a 80 °C, con T apagado < T encendido."}
 ESTADO = (("L", "Nivel [mm]", str), ("SP", "Setpoint [mm]", str),
           ("T", "Temperatura [°C]", lambda v: ("%.1f" % v).replace(".", ",")),
+          ("TON", "T encendido [°C]", str), ("TOFF", "T apagado [°C]", str),
           ("PWM", "Bomba [% PWM]", str), ("FAN", "Ventilador", lambda v: "ON" if v else "OFF"),
           ("ALM", "Alarma", lambda v: "ON" if v else "OFF"),
           ("ERR", "Sensor", lambda v: "FALLA" if v else "OK"),
@@ -51,10 +53,11 @@ def parse_telemetria(linea):
     if m is None:
         return None
     v = m.groups()
-    d = {"L": int(v[0]), "SP": int(v[1]), "T": float(v[2]), "PWM": int(v[3]),
-         "FAN": int(v[4]), "ALM": int(v[5]), "ERR": int(v[6]), "MODO": v[7]}
+    d = {"L": int(v[0]), "SP": int(v[1]), "T": float(v[2]), "TON": int(v[3]), "TOFF": int(v[4]),
+         "PWM": int(v[5]), "FAN": int(v[6]), "ALM": int(v[7]), "ERR": int(v[8]), "MODO": v[9]}
     if (d["L"] > 220 or not (d["SP"] == 0 or 30 <= d["SP"] <= 160)
-            or d["T"] > 330.0 or d["PWM"] > 100):
+            or d["T"] > 330.0 or d["PWM"] > 100
+            or not T_UMBRAL_MIN <= d["TOFF"] < d["TON"] <= T_UMBRAL_MAX):
         return None
     return d
 
@@ -63,23 +66,10 @@ def comando(tipo, valor):
     """Arma un comando PC -> MCU (comando("SP", 120) -> b"SP=120\\n"); ValueError si es inválido."""
     texto = str(valor).strip()
     v = int(texto) if re.fullmatch(r"[0-9]{1,3}", texto) else -1
-    if (tipo == "SP" and (v == 0 or 30 <= v <= 160)) or (tipo == "U" and 0 <= v <= 100):
+    if ((tipo == "SP" and (v == 0 or 30 <= v <= 160)) or (tipo == "U" and 0 <= v <= 100)
+            or (tipo in ("TON", "TOFF") and T_UMBRAL_MIN <= v <= T_UMBRAL_MAX)):
         return ("%s=%d\n" % (tipo, v)).encode("ascii")
     raise ValueError(MENSAJES.get(tipo, "Comando desconocido: %r" % (tipo,)))
-
-
-def crear_csv(carpeta, ahora):
-    """Crea registro_AAAAMMDD_HHMMSS.csv con la cabecera, sin sobrescribir; lo devuelve abierto."""
-    nombre = os.path.join(carpeta, ahora.strftime("registro_%Y%m%d_%H%M%S.csv"))
-    archivo = open(nombre, "x", encoding="ascii", newline="")
-    archivo.write(CABECERA_CSV + "\n")
-    return archivo
-
-
-def fila_csv(t_s, d):
-    """Fila del CSV (con fin de línea) en el orden de CABECERA_CSV; t_s en segundos, 1 decimal."""
-    return "%.1f,%d,%d,%.1f,%d,%d,%d,%d,%s\n" % (t_s, d["L"], d["SP"], d["T"], d["PWM"],
-                                                 d["FAN"], d["ALM"], d["ERR"], d["MODO"])
 
 
 class Enlace:
@@ -123,9 +113,9 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Control de nivel — G7")
-        self.enlace, self.historia, self.csv, self.t0_csv = Enlace(), deque(maxlen=600), None, 0.0
+        self.enlace, self.historia = Enlace(), deque(maxlen=600)
         self.t_dato, self.recibiendo = 0.0, None
-        self.var_puerto, self.var_csv = tk.StringVar(), tk.BooleanVar()
+        self.var_puerto = tk.StringVar()
         self._armar()
         self._listar_puertos()
         self.protocol("WM_DELETE_WINDOW", self._salir)
@@ -138,9 +128,7 @@ class App(tk.Tk):
         self.combo = ttk.Combobox(sup, textvariable=self.var_puerto, width=42,
                                   postcommand=self._listar_puertos)
         self.boton = ttk.Button(sup, text="Conectar", command=self._conectar)
-        casilla = ttk.Checkbutton(sup, text="Registrar CSV", variable=self.var_csv,
-                                  command=self._alternar_csv)
-        for widget in (ttk.Label(sup, text="Puerto"), self.combo, self.boton, casilla):
+        for widget in (ttk.Label(sup, text="Puerto"), self.combo, self.boton):
             widget.pack(side="left", padx=4)
         estado = ttk.LabelFrame(self, text="Estado", padding=8)
         estado.grid(row=1, column=0, sticky="new", padx=6)
@@ -161,6 +149,13 @@ class App(tk.Tk):
             boton.grid(row=fila, column=2, sticky="ew")
         ttk.Button(cmd, text="Detener (SP=0)", command=lambda: self._enviar("SP", 0)).grid(
             row=1, column=0, columnspan=3, sticky="ew", pady=6)
+        umbrales = []
+        for fila, texto in ((3, "T encendido [°C]"), (4, "T apagado [°C]")):
+            ttk.Label(cmd, text=texto).grid(row=fila, column=0, sticky="w", pady=(6, 0))
+            umbrales.append(ttk.Entry(cmd, width=6))
+            umbrales[-1].grid(row=fila, column=1, padx=6, pady=(6, 0))
+        ttk.Button(cmd, text="Aplicar umbrales", command=lambda: self._enviar_umbrales(
+            umbrales[0].get(), umbrales[1].get())).grid(row=3, column=2, rowspan=2, sticky="nsew")
         self.lienzos = []
         for fila, (titulo, alto, *_) in enumerate(GRAFICOS, start=1):
             marco = ttk.LabelFrame(self, text=titulo, padding=4)
@@ -210,7 +205,7 @@ class App(tk.Tk):
         self._estado(mensaje, error)
 
     def _enviar(self, tipo, valor):
-        """Valida y envía un comando SP o U; los errores se informan en la barra de estado."""
+        """Valida y envía un comando SP, U, TON o TOFF; los errores se informan en la barra de estado."""
         if self.enlace.puerto is None:
             return self._estado("Primero conecte el puerto.", True)
         try:
@@ -222,22 +217,22 @@ class App(tk.Tk):
         except OSError as e:
             self._desconectar("Se perdió la conexión al enviar: %s" % e, True)
 
-    def _alternar_csv(self):
-        """Casilla Registrar CSV: crea registro_AAAAMMDD_HHMMSS.csv o cierra el registro actual."""
-        if self.var_csv.get():
-            try:
-                self.csv, self.t0_csv = crear_csv(CARPETA, datetime.now()), time.monotonic()
-                self._estado("Registrando en " + self.csv.name)
-            except OSError as e:
-                self.var_csv.set(False)
-                self._estado("No se pudo crear el CSV: %s" % e, True)
-        elif self.csv is not None:
-            self.csv.close()
-            self._estado("CSV guardado: " + self.csv.name)
-            self.csv = None
+    def _enviar_umbrales(self, t_on, t_off):
+        """Envía TON y TOFF en el orden que mantiene TOFF < TON en el micro en todo momento;
+        el segundo sale 300 ms después para no pisar la línea anterior en el buffer de la UART."""
+        try:
+            on, off = int(str(t_on).strip()), int(str(t_off).strip())
+        except ValueError:
+            on = off = -1
+        if not T_UMBRAL_MIN <= off < on <= T_UMBRAL_MAX:
+            return self._estado(MENSAJES["TON"], True)
+        off_actual = self.historia[-1][1]["TOFF"] if self.historia else 40
+        orden = (("TON", on), ("TOFF", off)) if on > off_actual else (("TOFF", off), ("TON", on))
+        self._enviar(*orden[0])
+        self.after(300, lambda: self._enviar(*orden[1]))
 
     def _sondear(self):
-        """Cada 100 ms: lee el puerto, procesa las tramas, registra el CSV y vigila el silencio."""
+        """Cada 100 ms: lee el puerto, procesa las tramas y vigila el silencio."""
         self.after(PERIODO_MS, self._sondear)
         if self.enlace.puerto is None:
             return
@@ -259,9 +254,6 @@ class App(tk.Tk):
             for clave, _, formato in ESTADO:
                 color = ROJO if clave in ("ALM", "ERR") and d[clave] else ""
                 self.valores[clave].configure(text=formato(d[clave]), foreground=color)
-            if self.csv is not None and t >= self.t0_csv:
-                self.csv.write(fila_csv(t - self.t0_csv, d))
-                self.csv.flush()
         if lineas:
             self._graficar()
         elif self.recibiendo is not False and ahora - self.t_dato > SILENCIO_S:
@@ -293,9 +285,7 @@ class App(tk.Tk):
                     c.create_line(*pts, fill=color, width=2, dash=trazo)
 
     def _salir(self):
-        """Cierra el CSV y el puerto antes de cerrar la ventana."""
-        if self.csv is not None:
-            self.csv.close()
+        """Cierra el puerto antes de cerrar la ventana."""
         self.enlace.cerrar()
         self.destroy()
 

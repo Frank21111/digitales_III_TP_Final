@@ -2,14 +2,14 @@
 
 Proteus no trae modelo de simulación del LPC1769 (ni de ningún LPC17xx). Esta carpeta contiene uno hecho para el TPI: una DLL de modelo VSM con un intérprete del Cortex-M3 y los periféricos del LPC1769 que usa la cátedra. El modelo ejecuta **el mismo `.axf` que genera MCUXpresso**, sin cambiar el firmware.
 
-**Estado (2026-11-10):** probado sólo en Linux. El núcleo se comparó contra Unicorn (12 000 bloques de instrucciones sin diferencias). El firmware del TPI y seis firmwares de prueba corren completos en un host que imita a Proteus. **Todavía no se ejecutó dentro de Proteus.** La sección 4 es la validación que falta, en orden; si algo falla, la ventana de registro del modelo dice qué pasó (sección 7).
+**Estado (2026-11-10):** probado sólo en Linux. El núcleo se comparó contra Unicorn: 24 000 bloques de instrucciones sin diferencias. El firmware del TPI y siete firmwares de prueba corren completos en un host que imita a Proteus. Tres revisiones independientes del código (núcleo, periféricos y adaptador) señalaron 34 defectos y riesgos: 29 están corregidos y los otros figuran en la sección 8. **Todavía no se ejecutó dentro de Proteus.** La sección 4 es la validación que falta, en orden; si algo falla, la ventana de registro del modelo dice qué pasó (sección 7).
 
 | Carpeta / archivo | Contenido |
 |---|---|
-| `Modelo_LPC1769/bin/x64/LPC1769.DLL` | Modelo para Proteus de 64 bits (el de ustedes) |
-| `Modelo_LPC1769/bin/x86/LPC1769.DLL` | Modelo para Proteus de 32 bits (8.5 y anteriores) |
+| `Modelo_LPC1769/bin/x64/LPC1769.DLL` y `HCSR04.DLL` | Modelos para Proteus de 64 bits (el de ustedes) |
+| `Modelo_LPC1769/bin/x86/LPC1769.DLL` y `HCSR04.DLL` | Modelos para Proteus de 32 bits (8.5 y anteriores) |
 | `Modelo_LPC1769/pines_J6.csv` | Los 54 pines del conector J6 para crear el componente |
-| `Pruebas/` | Seis firmwares de prueba (fuente `.c`, `.axf` y `.hex` listos) y el firmware del TPI compilado |
+| `Pruebas/` | Siete firmwares de prueba (fuente `.c`, `.axf` y `.hex` listos) y el firmware del TPI compilado |
 | `Modelo_LPC1769/src/` | Código del modelo (núcleo, periféricos, adaptador VSM) |
 | `Modelo_LPC1769/tests/` | Pruebas de Linux: diferencial contra Unicorn, SoC, host que imita a Proteus |
 
@@ -18,7 +18,7 @@ Proteus no trae modelo de simulación del LPC1769 (ni de ningún LPC17xx). Esta 
 ## 1. Instalación
 
 1. Ver si el Proteus es de 64 bits: en el Administrador de tareas, `PDS.EXE` sin «(32 bits)».
-2. Copiar `bin/x64/LPC1769.DLL` (o `bin/x86/` si es de 32 bits) a la carpeta de modelos de Proteus. Para saber cuál es: **System → System Settings → Simulation Model and Module Folders**. Suele ser `C:\ProgramData\Labcenter Electronics\Proteus 8 Professional\MODELS`.
+2. Copiar `bin/x64/LPC1769.DLL` y `bin/x64/HCSR04.DLL` (o las de `bin/x86/` si es de 32 bits) a la carpeta de modelos de Proteus. Para saber cuál es: **System → System Settings → Simulation Model and Module Folders**. Suele ser `C:\ProgramData\Labcenter Electronics\Proteus 8 Professional\MODELS`.
 3. Reiniciar Proteus.
 
 La DLL no necesita nada más: sólo usa bibliotecas de Windows 10/11.
@@ -47,12 +47,14 @@ Se dibuja una vez y queda en una biblioteca del usuario. El mismo símbolo sirve
 | `POPUP` | `1` | Abre la ventana de registro del modelo |
 | `BREAKONFAULT` | `1` | Pausa la simulación si el firmware cae en HardFault |
 | `ADC0` … `ADC7` | `0` | Tensión fija [V] de cada canal, sólo en modo `DIGITAL` |
+| `ASTEP` | `1m` | Paso máximo del simulador analógico mientras hay pines analógicos: la tensión que lee el ADC tiene a lo sumo esta antigüedad |
+| `AGMIN` | `1n` | Conductancia a masa de cada pin analógico, para que un AD0.x sin conectar no deje un nodo flotante. `0` la desactiva |
 
    - Guardar en una biblioteca nueva, por ejemplo `TPI`.
 
 ## 3. Crear el componente HCSR04
 
-Proteus tampoco trae el HC-SR04. La misma DLL incluye un modelo: responde a cada pulso de TRIG de al menos 10 µs con un ECHO de 2·d / 343 m/s, 250 µs después. Si d supera 4 m, devuelve un ECHO de 38 ms, como el módulo real sin obstáculo.
+Proteus tampoco trae el HC-SR04. `HCSR04.DLL` es su modelo: responde a cada pulso de TRIG de al menos 10 µs con un ECHO de 2·d / 343 m/s, 250 µs después. Si d supera 4 m, devuelve un ECHO de 38 ms, como el módulo real sin obstáculo.
 
 - Pines: `TRIG` (Input), `ECHO` (Output), `DIST` (Input), `VCC` (Power), `GND` (Power).
 - Propiedades:
@@ -60,9 +62,9 @@ Proteus tampoco trae el HC-SR04. La misma DLL incluye un modelo: responde a cada
 | Propiedad | Valor | Para qué sirve |
 |---|---|---|
 | `PRIMITIVE` | `MIXED,HCSR04` | (o `DIGITAL,HCSR04`) |
-| `MODDLL` | `LPC1769.DLL` | |
+| `MODDLL` | `HCSR04.DLL` | |
 | `MMPERVOLT` | `100` | La tensión en `DIST` fija la distancia: 1 V = 100 mm |
-| `DISTANCE` | `0.2` | Distancia [m] si `DIST` no está conectado o el modelo es `DIGITAL` |
+| `DISTANCE` | `200` | Distancia en mm, sin unidad, si `DIST` no está conectado o el modelo es `DIGITAL` |
 | `DELAY` | `250u` | Demora entre el fin de TRIG y el inicio de ECHO |
 | `POPUP` | `0` | `1` muestra cada disparo en una ventana |
 
@@ -76,10 +78,11 @@ Cada prueba agrega un periférico. Hay que pasar a la siguiente sólo si la ante
 |---|---|---|---|
 | 1 | `01_blinky.axf` | Osciloscopio o LED con 330 Ω en J6-24 | Onda cuadrada de 1 Hz (500 ms arriba, 500 ms abajo) |
 | 2 | `02_uart_eco.axf` | Virtual Terminal: RXD a J6-21, TXD a J6-22, 9600 8N1 | Muestra `LPC1769 en Proteus: UART0 OK`, devuelve lo que se tipea y `lineas=n` con Enter |
-| 3 | `03_captura.axf` | HCSR04: TRIG a J6-39, ECHO a J6-38; `DISTANCE=0.2`; Virtual Terminal | `ancho=1166 us d=200 mm` cada 100 ms |
+| 3 | `03_captura.axf` | HCSR04: TRIG a J6-39, ECHO a J6-38; `DISTANCE=200`; Virtual Terminal | `ancho=1166 us d=200 mm` cada 100 ms |
 | 4 | `04_pwm.axf` | Osciloscopio en J6-42; Virtual Terminal | Período de 1 ms; ancho alto de 0; 0,25; 0,5; 0,75 y 1 ms, cambiando cada segundo |
 | 5 | `05_adc.axf` | Fuente DC de 0,25 V (o el LM35) en J6-15; Virtual Terminal | `raw=310 mV=249`; con más de 1,65 V se enciende J6-24 |
 | 6 | `06_eint.axf` | Pulsador (`BUTTON`) de J6-51 a GND; Virtual Terminal | Cada pulsación imprime `EINT0 n` y cambia J6-24 |
+| 7 | `07_adc_mat.axf` | Fuente DC de 0,25 V en J6-15; Virtual Terminal | `raw=310` diez veces por segundo: el ADC convierte en cada flanco de MAT0.1 y avisa por interrupción |
 
 Los mismos resultados se obtuvieron en Linux con el host de prueba (`tests/run_axf.cpp`).
 
@@ -111,7 +114,7 @@ Valores obtenidos en Linux con el firmware de `Firmware/` sin modificar:
 
 | Paso | Acción | Esperado |
 |---|---|---|
-| 1 | Arrancar; pote del HC-SR04 en 2,0 V (200 mm); LM35 en 25 °C | Telemetría cada 500 ms: `L=20,SP=0,T=24.9,PWM=0,FAN=0,ALM=0,ERR=0,MODO=A` |
+| 1 | Arrancar; pote del HC-SR04 en 2,0 V (200 mm); LM35 en 25 °C | Telemetría cada 500 ms: `L=20,SP=0,T=24.9,TON=45,TOFF=40,PWM=0,FAN=0,ALM=0,ERR=0,MODO=A` |
 | 2 | Osciloscopio en J6-39 | Pulso de TRIG de 11–12 µs cada 100 ms. Llega a 11 µs porque el bucle de espera arranca en cualquier punto de la cuenta de 1 µs del TIMER2; sigue por encima de los 10 µs que pide el sensor |
 | 3 | Enviar `SP=120` | `SP=120` y `PWM=100`: el error de 100 mm satura el PI; 1 kHz en J6-42 con duty 100 % |
 | 4 | Pote en 1,1 V (110 mm, nivel 110 mm) | `L=110` y `PWM=15` (1,51 %/mm × 10 mm); el duty sube lento por la integral |
@@ -119,6 +122,7 @@ Valores obtenidos en Linux con el firmware de `Firmware/` sin modificar:
 | 6 | LM35 a 39 °C | `FAN=0,ALM=0` (histéresis 45/40 °C) |
 | 7 | Pote en 0,4 V (40 mm, nivel 180 mm) | `L=180` y `PWM=0` (corte de seguridad) |
 | 8 | Desconectar ECHO | `ERR=1` y `PWM=0` después de 3 disparos sin eco |
+| 9 | LM35 a 39 °C; enviar `TON=35`, después `TOFF=30` y `TON=35` | El primer `TON=35` se ignora porque no supera a TOFF=40. Con 35/30 la trama muestra `TON=35,TOFF=30` y en menos de 1 s `FAN=1,ALM=1`. Valores fuera de 30–80 se ignoran |
 
 ## 7. Diagnóstico
 
@@ -136,7 +140,7 @@ La ventana «LPC1769 - registro del modelo» se abre desde **Debug** con la simu
 
 | Síntoma | Causa probable | Qué hacer |
 |---|---|---|
-| `External model DLL "LPC1769.DLL" not found` | Carpeta equivocada o DLL de otra arquitectura | Revisar la carpeta de la sección 1; probar la DLL de `x86` |
+| `External model DLL "LPC1769.DLL" not found` (o `HCSR04.DLL`) | Carpeta equivocada o DLL de otra arquitectura | Revisar la carpeta de la sección 1; probar las DLL de `x86` |
 | Proteus rechaza `PRIMITIVE=MIXED` | La palabra clave del modelo mixto no es la que suponemos: no hay documentación pública | Usar `DIGITAL,LPC1769`; el ADC toma `ADC0`… `ADC7`. Avisar para corregirlo |
 | `falta la propiedad PROGRAM` o `no se pudo abrir` | Ruta vacía o relativa | Usar ruta absoluta al `.axf` |
 | Las salidas valen 5 V en vez de 3,3 V | La interfaz digital-analógica de Proteus no toma la tensión de VDD | Avisar; mientras tanto no afecta la lógica, sí el cálculo de las corrientes de base y LED |
@@ -150,6 +154,9 @@ La ventana «LPC1769 - registro del modelo» se abre desde **Debug** con la simu
 - **Periféricos no modelados.** I2C, SSP/SPI, DAC, RIT, RTC, WDT, DMA, USB, CAN, Ethernet, MCPWM y QEI: leen 0 y la ventana de registro lo avisa.
 - **Captura y PWM.** No están modelados el modo contador de los timers (CTCR) ni la captura del PWM1.
 - **Arranque.** No se modela el bootloader ni el IAP: el programa arranca directo en el vector de reset.
+- **Retornos de excepción mal armados.** No se verifican todas las condiciones de consistencia de un retorno de excepción (por ejemplo, volver a modo Thread con otras excepciones activas). Sólo afecta a firmware con errores.
+- **Privilegios.** CONTROL.nPRIV se guarda pero no restringe nada: el código sin privilegios puede hacer lo mismo que el privilegiado. Sólo importa con un RTOS que separe privilegios.
+- **Latch del PWM1.** Con el contador detenido, los registros de match se cargan directo, sin esperar a LER. El firmware que olvida LER funciona en la simulación y puede fallar en la placa.
 
 ## 9. Recompilar el modelo
 

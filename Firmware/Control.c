@@ -4,7 +4,8 @@
  * @details Convierte distancia en nivel, decide el ciclo de trabajo de la bomba
  *          según el modo (AUTO con PI o MANUAL, usado para identificar la
  *          planta), aplica el corte por nivel máximo y la reacción ante falla del
- *          sensor, y gobierna ventilador y alarma con histéresis. Sólo lo usa el
+ *          sensor, y gobierna ventilador y alarma con histéresis entre dos umbrales
+ *          configurables desde la PC. Sólo lo usa el
  *          superlazo: ninguna ISR accede a estas variables.
  * @note    ESW.2.1.2
  ********************************************************************************/
@@ -36,13 +37,14 @@ static uint8_t dutyManual = 0U;     // Ciclo de trabajo pedido en modo manual [%
  *============================================================================*/
 /*******************************************************************************//**
  * @brief   Inicializa el estado del proceso y el PI.
- * @details Modo AUTO con setpoint 0 (bomba apagada), sin falla ni alarma. PI con
- *          Kp, Ki, Kd y Ts de Control.h y salida limitada a 0–100 %.
+ * @details Modo AUTO con setpoint 0 (bomba apagada), sin falla ni alarma y con los
+ *          umbrales térmicos por defecto (T_ON_DC y T_OFF_DC). PI con Kp, Ki, Kd y
+ *          Ts de Control.h y salida limitada a 0–100 %.
  * @note    USW.2.1.2.1
  ********************************************************************************/
 void Control_Init(void)
 {
-    estado = (Estado_t){ .modo = MODO_AUTO };
+    estado = (Estado_t){ .modo = MODO_AUTO, .tOn_dC = T_ON_DC, .tOff_dC = T_OFF_DC };
     dutyManual = 0U;
     PID_Init(&pid, PID_KP, PID_KI, PID_KD, PID_TS, 0.0f, (float)DUTY_MAX);
 }
@@ -92,17 +94,19 @@ void Control_FallaSensor(void)
 
 /*******************************************************************************//**
  * @brief   Gobierna ventilador y alarma con histéresis de temperatura.
- * @details T ≥ 45,0 °C enciende, T ≤ 40,0 °C apaga y entre ambos mantiene el
- *          estado: la banda evita conmutaciones por ruido cerca de un umbral.
+ * @details T ≥ umbral de encendido (45,0 °C por defecto) enciende, T ≤ umbral de
+ *          apagado (40,0 °C por defecto) apaga y entre ambos mantiene el estado:
+ *          la banda evita conmutaciones por ruido cerca de un umbral. Los umbrales
+ *          se cambian desde la PC con Control_SetTempOn y Control_SetTempOff.
  * @param   temperatura Temperatura de la placa [0,1 °C].
  * @note    USW.2.1.2.4
  ********************************************************************************/
 void Control_Termico(uint16_t temperatura)
 {
     estado.temp_dC = temperatura;
-    if (temperatura >= T_ON_DC) {
+    if (temperatura >= estado.tOn_dC) {
         estado.alarma = true;
-    } else if (temperatura <= T_OFF_DC) {
+    } else if (temperatura <= estado.tOff_dC) {
         estado.alarma = false;
     }
     estado.ventilador = estado.alarma;
@@ -160,4 +164,44 @@ bool Control_SetManual(uint16_t porcentaje)
 const Estado_t *Control_GetEstado(void)
 {
     return &estado;
+}
+
+/*******************************************************************************//**
+ * @brief   Fija el umbral de encendido de la alarma térmica.
+ * @details Válido: T_UMBRAL_MIN_C..T_UMBRAL_MAX_C °C y mayor que el umbral de
+ *          apagado (la histéresis no puede ser nula ni negativa). Se guarda en
+ *          décimas de °C y rige desde la próxima conversión del LM35 (≤ 1 s).
+ *          Vive en RAM: tras un reset vuelve a T_ON_DC.
+ * @param   grados  Umbral de encendido [°C].
+ * @return  true si se aplicó; false si el valor es inválido.
+ * @note    USW.2.1.2.8
+ ********************************************************************************/
+bool Control_SetTempOn(uint16_t grados)
+{
+    if ((grados < T_UMBRAL_MIN_C) || (grados > T_UMBRAL_MAX_C)
+            || ((grados * 10U) <= estado.tOff_dC)) {
+        return false;
+    }
+    estado.tOn_dC = (uint16_t)(grados * 10U);
+    return true;
+}
+
+/*******************************************************************************//**
+ * @brief   Fija el umbral de apagado de la alarma térmica.
+ * @details Válido: T_UMBRAL_MIN_C..T_UMBRAL_MAX_C °C y menor que el umbral de
+ *          encendido. Se guarda en décimas de °C y rige desde la próxima
+ *          conversión del LM35 (≤ 1 s). Vive en RAM: tras un reset vuelve a
+ *          T_OFF_DC.
+ * @param   grados  Umbral de apagado [°C].
+ * @return  true si se aplicó; false si el valor es inválido.
+ * @note    USW.2.1.2.9
+ ********************************************************************************/
+bool Control_SetTempOff(uint16_t grados)
+{
+    if ((grados < T_UMBRAL_MIN_C) || (grados > T_UMBRAL_MAX_C)
+            || ((grados * 10U) >= estado.tOn_dC)) {
+        return false;
+    }
+    estado.tOff_dC = (uint16_t)(grados * 10U);
+    return true;
 }

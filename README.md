@@ -27,7 +27,7 @@ flowchart LR
 | Carpeta | Contenido |
 |---|---|
 | `Firmware/` | Firmware en C sobre registros CMSIS, en tres capas (aplicación, servicios, dispositivos) |
-| `PC/` | `app_nivel.py`: interfaz Tkinter con telemetría, gráficos y registro CSV · `identificar.py`: ajuste de K y τ y cálculo del PI |
+| `PC/` | `app_nivel.py`: interfaz Tkinter con telemetría, gráficos y comandos · `identificar.py`: ajuste de K y τ desde la telemetría y cálculo del PI |
 | `Proteus/` | Modelo VSM propio del LPC1769 y del HC-SR04 para simular en Proteus, y firmwares de prueba ([guía](Proteus/README.md)) |
 | `Anteproyecto_control_nivel_agua.md` | Modelo matemático del tanque y su linealización |
 
@@ -43,10 +43,10 @@ pip install -r requirements.txt
 python app_nivel.py
 ```
 
-**Identificación de la planta**: en modo MANUAL, aplicar un escalón de PWM, registrar hasta que el nivel se estabilice y luego:
+**Identificación de la planta**: con la app cerrada (el puerto COM es exclusivo), abrir un terminal serie a 9600 8N1 que guarde lo recibido en un archivo de texto (PuTTY: *Session › Logging › Printable output*; CoolTerm: *Connection › Capture to Text File*). Desde ese terminal, con el nivel estable, enviar `U=40`, esperar a que se estabilice, enviar `U=45` y registrar unos 15 min. Luego:
 
 ```bash
-python identificar.py registro_AAAAMMDD_HHMMSS.csv --lambda 30
+python identificar.py ensayo.txt --lambda 30
 ```
 
 El script imprime las líneas `#define PID_KP` y `PID_KI` listas para pegar en `Control.h`.

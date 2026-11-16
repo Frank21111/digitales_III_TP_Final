@@ -2,7 +2,8 @@
  * @file    Comm.c
  * @brief   Protocolo ASCII de comandos y telemetría sobre la UART0.
  * @details Interpreta las líneas recibidas ("SP=<n>": nivel deseado en mm;
- *          "U=<n>": modo manual con n % de bomba) y arma la telemetría con las
+ *          "U=<n>": modo manual con n % de bomba; "TON=<n>" y "TOFF=<n>":
+ *          umbrales de la alarma térmica en °C) y arma la telemetría con las
  *          variables de Control.c. Al ser texto legible, también se puede probar
  *          con un terminal serie. Número ↔ texto con código propio (sin printf).
  * @note    ESW.2.1.4
@@ -19,7 +20,7 @@
  * DEFINICIÓN DE CONSTANTES
  *============================================================================*/
 #define COMM_LINEA_TAM      (UART_LINEA_MAX + 1U)   // Línea recibida más '\0'
-#define COMM_TRAMA_TAM      64U                     // Campos numéricos (≤ 51) más '\0'
+#define COMM_TRAMA_TAM      80U                     // Campos numéricos (≤ 70) más '\0'
 #define COMM_CIFRAS_MAX     5U                      // Cifras aceptadas en un valor
 #define COMM_VALOR_MAX      65535U                  // Máximo representable en uint16_t
 
@@ -29,7 +30,9 @@
 typedef enum {
     CMD_NINGUNO = 0,                // Línea vacía, desconocida o mal formada
     CMD_SETPOINT,                   // "SP=<n>": nivel deseado [mm]
-    CMD_MANUAL                      // "U=<n>": ciclo de trabajo manual [%]
+    CMD_MANUAL,                     // "U=<n>": ciclo de trabajo manual [%]
+    CMD_TEMP_ON,                    // "TON=<n>": umbral de encendido de la alarma [°C]
+    CMD_TEMP_OFF                    // "TOFF=<n>": umbral de apagado de la alarma [°C]
 } Comando_t;
 
 /*==============================================================================
@@ -45,7 +48,8 @@ static uint8_t Comm_AgregarCampo(char *trama, uint8_t pos, const char *etiqueta,
 /*******************************************************************************//**
  * @brief   Atiende el comando recibido por la UART, si hay uno.
  * @details Toma la línea con UART_LeerLinea, la interpreta y la aplica con
- *          Control_SetSetpoint o Control_SetManual. Un comando mal formado o
+ *          Control_SetSetpoint, Control_SetManual, Control_SetTempOn o
+ *          Control_SetTempOff. Un comando mal formado o
  *          fuera de rango se ignora: la PC lo nota en la telemetría.
  * @note    USW.2.1.4.1
  ********************************************************************************/
@@ -63,15 +67,19 @@ void Comm_ProcesarComandos(void)
         (void)Control_SetSetpoint(valor);
     } else if (comando == CMD_MANUAL) {
         (void)Control_SetManual(valor);
+    } else if (comando == CMD_TEMP_ON) {
+        (void)Control_SetTempOn(valor);
+    } else if (comando == CMD_TEMP_OFF) {
+        (void)Control_SetTempOff(valor);
     }
 }
 
 /*******************************************************************************//**
  * @brief   Envía una trama de telemetría con el estado del proceso.
- * @details Ejemplo: "L=105,SP=120,T=34.5,PWM=42,FAN=0,ALM=0,ERR=0,MODO=A\n". Los
- *          campos numéricos se arman con Comm_AgregarCampo (T con un decimal);
- *          MODO, que es un carácter, se envía después junto con el '\n'.
- *          A 9600 baud la trama demora ≈ 55 ms.
+ * @details Ejemplo: "L=105,SP=120,T=34.5,TON=45,TOFF=40,PWM=42,FAN=0,ALM=0,ERR=0,
+ *          MODO=A\n". Los campos numéricos se arman con Comm_AgregarCampo (T con
+ *          un decimal; TON y TOFF en °C enteros); MODO, que es un carácter, se
+ *          envía después junto con el '\n'. A 9600 baud la trama demora ≈ 70 ms.
  * @note    USW.2.1.4.2
  ********************************************************************************/
 void Comm_EnviarTelemetria(void)
@@ -83,6 +91,8 @@ void Comm_EnviarTelemetria(void)
     pos = Comm_AgregarCampo(trama, 0U, "L=", estado->nivel_mm, false);
     pos = Comm_AgregarCampo(trama, pos, ",SP=", estado->setpoint_mm, false);
     pos = Comm_AgregarCampo(trama, pos, ",T=", estado->temp_dC, true);
+    pos = Comm_AgregarCampo(trama, pos, ",TON=", estado->tOn_dC / 10U, false);
+    pos = Comm_AgregarCampo(trama, pos, ",TOFF=", estado->tOff_dC / 10U, false);
     pos = Comm_AgregarCampo(trama, pos, ",PWM=", estado->duty, false);
     pos = Comm_AgregarCampo(trama, pos, ",FAN=", estado->ventilador, false);
     pos = Comm_AgregarCampo(trama, pos, ",ALM=", estado->alarma, false);
@@ -94,12 +104,13 @@ void Comm_EnviarTelemetria(void)
 
 /*******************************************************************************//**
  * @brief   Interpreta una línea de comando.
- * @details Acepta exactamente "SP=" o "U=" seguido de 1 a 5 cifras y nada más.
+ * @details Acepta exactamente "SP=", "U=", "TON=" o "TOFF=" seguido de 1 a 5
+ *          cifras y nada más.
  *          El número se arma cifra a cifra: n = n·10 + (carácter − '0'). Los
  *          rangos válidos los controla Control.c.
  * @param   linea   Línea recibida, terminada en '\0' y sin '\n'.
  * @param   valor   Destino del número (sólo se escribe si la línea es válida).
- * @return  CMD_SETPOINT, CMD_MANUAL o CMD_NINGUNO.
+ * @return  CMD_SETPOINT, CMD_MANUAL, CMD_TEMP_ON, CMD_TEMP_OFF o CMD_NINGUNO.
  * @note    USW.2.1.4.3
  ********************************************************************************/
 static Comando_t Comm_ParsearComando(const char *linea, uint16_t *valor)
@@ -114,6 +125,14 @@ static Comando_t Comm_ParsearComando(const char *linea, uint16_t *valor)
     } else if ((linea[0] == 'U') && (linea[1] == '=')) {
         tipo = CMD_MANUAL;
         linea += 2;
+    } else if ((linea[0] == 'T') && (linea[1] == 'O') && (linea[2] == 'N')
+            && (linea[3] == '=')) {
+        tipo = CMD_TEMP_ON;
+        linea += 4;
+    } else if ((linea[0] == 'T') && (linea[1] == 'O') && (linea[2] == 'F')
+            && (linea[3] == 'F') && (linea[4] == '=')) {
+        tipo = CMD_TEMP_OFF;
+        linea += 5;
     } else {
         return CMD_NINGUNO;
     }

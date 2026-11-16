@@ -1,44 +1,54 @@
 """
 @file     identificar.py
-@brief    Identificación de la planta de nivel (primer orden) y cálculo del PI a partir del CSV de app_nivel.py.
-@details  Ensayo: en modo MANUAL (MODO = M), con el nivel estable, se aplica un escalón de PWM
-          (por ejemplo U=40 -> U=45) y se registra hasta que el nivel se estabilice de nuevo
-          (al menos 4 tau, unos 15 min). Se ajusta
+@brief    Identificación de la planta de nivel (primer orden) y cálculo del PI a partir de la telemetría.
+@details  Ensayo: con app_nivel.py cerrada (el puerto COM es exclusivo), un terminal serie a 9600 8N1
+          guarda la telemetría en un archivo de texto (PuTTY: Session > Logging > Printable output;
+          CoolTerm: Connection > Capture to Text File). Desde el mismo terminal se pasa a modo MANUAL
+          con el nivel estable, se aplica un escalón de PWM (por ejemplo U=40 -> U=45) y se registra
+          hasta que el nivel se estabilice de nuevo (al menos 4 tau, unos 15 min).
+          El firmware envía una trama cada 500 ms exactos (SysTick), así que el tiempo sale del orden
+          de las líneas: t = 0,5 s x índice. Una línea dañada conserva su turno; la primera y la
+          última se descartan porque pueden estar incompletas. Se ajusta
               dL(t) = K * dU * (1 - exp(-t / tau))
           por el método del 63,2 % y por mínimos cuadrados (búsqueda de tau por sección áurea,
           L0 y K*dU lineales). Con el lambda pedido se calcula la sintonía lambda/SIMC:
               Kc = tau / (K * lambda)   Ti = min(tau, 4 * lambda)   Ki = Kc / Ti
           e imprime las líneas #define para Control.h (PID_KP en %/mm, PID_KI en %/(mm*s)).
           Sólo usa la biblioteca estándar de Python 3.
-          Uso: python identificar.py registro_AAAAMMDD_HHMMSS.csv [--lambda 30] [--ventana 30]
+          Uso: python identificar.py ensayo.txt [--lambda 30] [--ventana 30]
 @note     SSE.3.1
 """
 import argparse
-import csv
 import math
+import re
 import sys
 
-CABECERA = ["t_s", "L_mm", "SP_mm", "T_C", "PWM_pct", "FAN", "ALM", "ERR", "MODO"]
+# Misma trama que TRAMA en app_nivel.py; se busca dentro de la línea para tolerar marcas de tiempo del terminal.
+TRAMA = re.compile(r"L=([0-9]{1,3}),SP=([0-9]{1,3}),T=([0-9]{1,3}\.[0-9]),TON=([0-9]{2}),"
+                   r"TOFF=([0-9]{2}),PWM=([0-9]{1,3}),FAN=([01]),ALM=([01]),ERR=([01]),MODO=([AM])")
+COMANDO = re.compile(r"(?:^|[\s\]])(SP|U|TON|TOFF)=[0-9]+\s*$")  # eco local de un comando, con o sin marca de tiempo
+PERIODO_TRAMA_S = 0.5  # el firmware envía una trama cada 500 ms (Tick.c, TICKS_TELEMETRIA)
 NIVEL_MAX_MM = 180
 TAU_MIN, TAU_MAX = 1.0, 5000.0
 
 
-def leer_csv(ruta):
-    """Lee el CSV de app_nivel.py y devuelve una lista de dict con t, L, pwm, err y modo."""
-    with open(ruta, newline="", encoding="utf-8-sig") as f:
-        lector = csv.reader(f)
-        cabecera = [c.strip() for c in next(lector, [])]
-        if cabecera != CABECERA:
-            raise ValueError("Cabecera inesperada: %s (se esperaba %s)" % (",".join(cabecera), ",".join(CABECERA)))
-        filas = []
-        for c in lector:
-            if len(c) != len(CABECERA):
-                continue
-            try:
-                filas.append({"t": float(c[0]), "L": float(c[1]), "pwm": float(c[4]),
-                              "err": int(c[7]), "modo": c[8].strip().upper()})
-            except ValueError:
-                continue
+def leer_registro(ruta):
+    """Lee la telemetría guardada por un terminal serie y devuelve una lista de dict con t, L, pwm, err y modo.
+    Cada línea de telemetría, válida o dañada, ocupa un turno de PERIODO_TRAMA_S; los comandos que el terminal
+    haya mostrado con eco local (SP=, U=, TON=, TOFF=) y las líneas vacías no ocupan turno."""
+    with open(ruta, encoding="utf-8", errors="replace") as f:
+        lineas = [x.strip() for x in f.read().replace("\r", "\n").split("\n")]
+    lineas = [x for x in lineas if x and not COMANDO.search(x)][1:-1]
+    filas = []
+    for k, linea in enumerate(lineas):
+        m = TRAMA.search(linea)
+        if m is None:
+            continue
+        v = m.groups()
+        filas.append({"t": PERIODO_TRAMA_S * k, "L": float(v[0]), "pwm": float(v[5]),
+                      "err": int(v[8]), "modo": v[9]})
+    if not filas:
+        raise ValueError("%s no tiene ninguna trama de telemetría (L=..,SP=..,T=..,TON=..,TOFF=..,PWM=..,...)" % ruta)
     return filas
 
 
@@ -151,9 +161,10 @@ def sintonia(K, tau, lam):
 
 
 def main():
-    """Lee el CSV, detecta el escalón, identifica K y tau, calcula el PI e imprime los #define."""
-    ap = argparse.ArgumentParser(description="Identifica K y tau del tanque desde el CSV de app_nivel.py y calcula el PI.")
-    ap.add_argument("csv", help="archivo registro_*.csv generado por app_nivel.py")
+    """Lee el registro, detecta el escalón, identifica K y tau, calcula el PI e imprime los #define."""
+    ap = argparse.ArgumentParser(description="Identifica K y tau del tanque desde la telemetría guardada con un "
+                                             "terminal serie y calcula el PI.")
+    ap.add_argument("registro", help="archivo de texto con las tramas de telemetría (9600 8N1)")
     ap.add_argument("--lambda", dest="lam", type=float, default=30.0, help="constante de tiempo deseada del lazo cerrado [s] (30)")
     ap.add_argument("--ventana", type=float, default=30.0, help="segundos promediados antes del escalón y al final (30)")
     ap.add_argument("--escalon", type=int, default=None, help="índice entre los escalones válidos (0 = el primero)")
@@ -164,7 +175,7 @@ def main():
         sys.exit("Error: --ventana debe ser un número positivo [s].")
 
     try:
-        filas = leer_csv(a.csv)
+        filas = leer_registro(a.registro)
         i, ini, fin = detectar_escalon(filas, a.escalon, a.ventana)
     except (OSError, ValueError, IndexError) as e:
         sys.exit("Error: %s" % e)
@@ -222,7 +233,7 @@ def main():
     print("Sintonía lambda/SIMC con lambda = %g s (sobre el ajuste por mínimos cuadrados):" % a.lam)
     print("  Kc = tau/(K lambda) = %.3f %%/mm   Ti = min(tau, 4 lambda) = %.1f s   Ki = Kc/Ti = %.5f %%/(mm s)" % (Kc, Ti, Ki))
     print("")
-    print("/* Control.h: identificado de %s (K = %.3f mm/%%, tau = %.1f s, lambda = %g s) */" % (a.csv, Kls, tau, a.lam))
+    print("/* Control.h: identificado de %s (K = %.3f mm/%%, tau = %.1f s, lambda = %g s) */" % (a.registro, Kls, tau, a.lam))
     print("#define PID_KP    %#.3gf" % Kc)
     print("#define PID_KI    %#.3gf" % Ki)
 

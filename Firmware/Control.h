@@ -1,7 +1,8 @@
 /*******************************************************************************//**
  * @file    Control.h
  * @brief   Interfaz de la lógica de control de nivel y de temperatura.
- * @details Parámetros del proceso y del PI, tipo Estado_t y funciones del ESW.
+ * @details Parámetros del proceso y del PI, umbrales térmicos por defecto, tipo
+ *          Estado_t y funciones del ESW.
  * @note    ESW.2.1.2
  ********************************************************************************/
 #ifndef CONTROL_H
@@ -18,13 +19,17 @@
 #define PID_KI          0.0126f     // Kc/Ti = 1,51/120 s = 0,0126 %/(mm·s)
 #define PID_KD          0.0f        // Control PI: sin término derivativo
 #define PID_TS          0.1f        // Ts = 100 ms (un disparo del HC-SR04)
-#define T_ON_DC         450U        // 45,0 °C: enciende ventilador, LED y buzzer
-#define T_OFF_DC        400U        // 40,0 °C: los apaga (histéresis de 5 °C)
+#define T_ON_DC         450U        // 45,0 °C: encendido por defecto (configurable con TON=)
+#define T_OFF_DC        400U        // 40,0 °C: apagado por defecto (configurable con TOFF=)
+#define T_UMBRAL_MIN_C  30U         // Umbral térmico mínimo configurable [°C]
+#define T_UMBRAL_MAX_C  80U         // Umbral térmico máximo configurable [°C]
 
 typedef struct {
     uint16_t nivel_mm;              // Nivel de agua medido [mm]
     uint16_t setpoint_mm;           // Nivel deseado [mm] (0 = bomba apagada)
     uint16_t temp_dC;               // Temperatura de la placa [0,1 °C]
+    uint16_t tOn_dC;                // Umbral de encendido de la alarma [0,1 °C]
+    uint16_t tOff_dC;               // Umbral de apagado de la alarma [0,1 °C]
     uint8_t  duty;                  // Ciclo de trabajo aplicado a la bomba [%]
     bool     ventilador;            // Ventilador encendido
     bool     alarma;                // LED y buzzer encendidos
@@ -39,5 +44,7 @@ void Control_Termico(uint16_t temperatura);
 bool Control_SetSetpoint(uint16_t setpoint);
 bool Control_SetManual(uint16_t porcentaje);
 const Estado_t *Control_GetEstado(void);
+bool Control_SetTempOn(uint16_t grados);
+bool Control_SetTempOff(uint16_t grados);
 
 #endif

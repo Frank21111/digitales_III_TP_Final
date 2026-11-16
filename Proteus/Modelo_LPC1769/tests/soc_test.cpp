@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
     std::string l1 = last_line(tel);
     printf("  telemetría: %s\n", l1.c_str());
     check(soc.cclk() > 99e6 && soc.cclk() < 101e6, "SystemInit deja CCLK en 100 MHz");
-    check(l1.rfind("L=20,SP=0,T=24.9,PWM=0,FAN=0,ALM=0,ERR=0,MODO=A", 0) == 0, "trama de telemetría esperada");
+    check(l1.rfind("L=20,SP=0,T=24.9,TON=45,TOFF=40,PWM=0,FAN=0,ALM=0,ERR=0,MODO=A", 0) == 0, "trama de telemetría esperada");
     int lines = 0; for (char c : tel) if (c == '\n') lines++;
     check(lines >= 3 && lines <= 4, "telemetría cada 500 ms (" + std::to_string(lines) + " tramas en 2 s)");
     double tw = 0; for (auto w : host.trig_widths) tw += (double)w; tw /= (double)host.trig_widths.size() * 1e6;
@@ -200,8 +200,28 @@ int main(int argc, char **argv) {
     check(l1.find("PWM=0,") != std::string::npos && l1.find("ERR=1") != std::string::npos, "falla de sensor: ERR=1 y bomba en 0 %");
     check(host.duty(11500 * MS, 12 * SEC) < 0.01, "P2.0 en bajo durante la falla");
 
+    printf("Etapa 8: umbrales desde la PC con LM35 a 39 °C (TON=35 rechazado, TOFF=30, TON=35)\n");
+    host.send_line(12 * SEC, "TON=35\n");
+    soc.run_until(12300 * MS);
+    l1 = last_line(host.decode_uart(12 * SEC, 12300 * MS));
+    printf("  telemetría: %s\n", l1.c_str());
+    check(l1.find("TON=45,TOFF=40") != std::string::npos, "TON=35 rechazado: no supera a TOFF=40");
+    host.send_line(12300 * MS, "TOFF=30\n");
+    host.send_line(12600 * MS, "TON=35\n");
+    soc.run_until(14500 * MS);
+    l1 = last_line(host.decode_uart(14 * SEC, 14500 * MS));
+    printf("  telemetría: %s\n", l1.c_str());
+    check(l1.find("T=39.0,TON=35,TOFF=30") != std::string::npos && l1.find("FAN=1,ALM=1") != std::string::npos,
+          "umbrales 35/30 aplicados: 39 °C enciende la alarma");
+    host.send_line(14500 * MS, "TOFF=81\n");
+    host.send_line(14800 * MS, "TON=9\n");
+    soc.run_until(15500 * MS);
+    l1 = last_line(host.decode_uart(15 * SEC, 15500 * MS));
+    printf("  telemetría: %s\n", l1.c_str());
+    check(l1.find("TON=35,TOFF=30") != std::string::npos, "valores fuera de 30..80 ignorados");
+
     double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - w0).count();
-    printf("\n12 s simulados en %.2f s reales (%.2fx tiempo real), %.0f M ciclos de CPU\n", wall, 12.0 / wall, (double)soc.instructions() / 1e6);
+    printf("\n15,5 s simulados en %.2f s reales (%.2fx tiempo real), %.0f M ciclos de CPU\n", wall, 15.5 / wall, (double)soc.instructions() / 1e6);
     printf("%s: %d fallas\n", fails ? "RESULTADO" : "RESULTADO", fails);
     return fails ? 1 : 0;
 }

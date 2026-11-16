@@ -364,7 +364,7 @@ int main(int argc, char **argv) {
     std::string l = last_line(decode_uart(*txd, 0, 2 * SEC, baud));
     printf("  telemetría: %s\n", l.c_str());
     if (digital_only) check(l.rfind("L=", 0) == 0 && l.find("T=24.9") != std::string::npos, "modo digital: T sale de la propiedad ADC0 = 0,25 V");
-    else check(l == "L=20,SP=0,T=24.9,PWM=0,FAN=0,ALM=0,ERR=0,MODO=A", "trama esperada a través de Proteus simulado");
+    else check(l == "L=20,SP=0,T=24.9,TON=45,TOFF=40,PWM=0,FAN=0,ALM=0,ERR=0,MODO=A", "trama esperada a través de Proteus simulado");
 
     printf("Etapa 2: SP=120 por la UART\n");
     send_line(2 * SEC, "SP=120\n");

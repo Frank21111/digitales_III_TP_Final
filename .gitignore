@@ -2,3 +2,6 @@ Practico
 plan.md
 plan_proteus.md
 
+__pycache__/
+Proteus/Modelo_LPC1769/build/
+Proteus/Modelo_LPC1769/tests/firmware/build/
