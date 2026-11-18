@@ -84,6 +84,8 @@ private:
     int64_t now_t = 0;
     EVENTID chain = 1;
     bool callback_seen = false;
+    bool retry_logged = false;
+    int64_t chain_t = 0;
     bool loaded = false;
     bool running = false;
     bool stop_logged = false;
@@ -99,6 +101,7 @@ private:
     void collect_pins();
     void flush_boot(ABSTIME time);
     void start_chain(ABSTIME time);
+    void check_chain(ABSTIME time);
     void report(const char *where);
     static STATE to_state(lpcsim::Drive d);
 };

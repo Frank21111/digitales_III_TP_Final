@@ -2,23 +2,27 @@
 
 Proteus no trae modelo de simulación del LPC1769 (ni de ningún LPC17xx). Esta carpeta contiene uno hecho para el TPI: una DLL de modelo VSM con un intérprete del Cortex-M3 y los periféricos del LPC1769 que usa la cátedra. El modelo ejecuta **el mismo `.axf` que genera MCUXpresso**, sin cambiar el firmware.
 
-**Estado (2026-11-10):** probado sólo en Linux. El núcleo se comparó contra Unicorn: 24 000 bloques de instrucciones sin diferencias. El firmware del TPI y siete firmwares de prueba corren completos en un host que imita a Proteus. Tres revisiones independientes del código (núcleo, periféricos y adaptador) señalaron 34 defectos y riesgos: 29 están corregidos y los otros figuran en la sección 8. **Todavía no se ejecutó dentro de Proteus.** La sección 4 es la validación que falta, en orden; si algo falla, la ventana de registro del modelo dice qué pasó (sección 7).
+**Estado (2026-11-10):** probado sólo en Linux. El núcleo se comparó contra Unicorn: 24 000 bloques de instrucciones sin diferencias. El firmware del TPI y siete firmwares de prueba corren completos en un host que imita a Proteus. Tres revisiones independientes del código (núcleo, periféricos y adaptador) señalaron 34 defectos y riesgos: 29 están corregidos y los otros figuran en la sección 8. **Todavía no se ejecutó desde la interfaz de Proteus.** La sección 4 es la validación que falta, en orden; si algo falla, la ventana de registro del modelo dice qué pasó (sección 7).
+
+**Validación en Windows (2026-11-16):** las DLL de `bin/x86` se cargaron en el simulador de Proteus 8.13 (`PROSPICE.EXE`, por consola, con netlists escritos a mano). Pasaron las siete pruebas de la sección 4 y los nueve pasos de la sección 6, con el HC-SR04 de esta carpeta, el paso analógico por defecto y las salidas medidas en los pines. Esa validación encontró y corrigió dos defectos: Proteus no autoriza dos DLL propias en la misma simulación (ahora `LPC1769.DLL` sirve a los dos modelos) y la CPU no arrancaba con un pin analógico conectado. Quedó sin validar: la interfaz gráfica, las etapas de potencia y el eco a través del divisor 1 kΩ / 2 kΩ (en los netlists hechos a mano una entrada digital no ve una red con resistencias analógicas).
 
 | Carpeta / archivo | Contenido |
 |---|---|
-| `Modelo_LPC1769/bin/x64/LPC1769.DLL` y `HCSR04.DLL` | Modelos para Proteus de 64 bits (el de ustedes) |
-| `Modelo_LPC1769/bin/x86/LPC1769.DLL` y `HCSR04.DLL` | Modelos para Proteus de 32 bits (8.5 y anteriores) |
+| `Modelo_LPC1769/bin/x64/LPC1769.DLL` | Modelo del LPC1769 y del HC-SR04 para Proteus de 64 bits |
+| `Modelo_LPC1769/bin/x86/LPC1769.DLL` | Lo mismo para Proteus de 32 bits. Proteus 8.13 también es de 32 bits: usar esta |
+| `Modelo_LPC1769/bin/*/HCSR04.DLL` | El HC-SR04 solo, para circuitos sin el LPC1769. No se puede combinar con `LPC1769.DLL` (ver 7.2) |
 | `Modelo_LPC1769/pines_J6.csv` | Los 54 pines del conector J6 para crear el componente |
 | `Pruebas/` | Siete firmwares de prueba (fuente `.c`, `.axf` y `.hex` listos) y el firmware del TPI compilado |
 | `Modelo_LPC1769/src/` | Código del modelo (núcleo, periféricos, adaptador VSM) |
 | `Modelo_LPC1769/tests/` | Pruebas de Linux: diferencial contra Unicorn, SoC, host que imita a Proteus |
+| `Modelo_LPC1769/tests/proteus/` | Banco para Windows: corre las pruebas de las secciones 4 y 6 dentro del simulador de Proteus (`PROSPICE.EXE`), sin la interfaz |
 
 ---
 
 ## 1. Instalación
 
-1. Ver si el Proteus es de 64 bits: en el Administrador de tareas, `PDS.EXE` sin «(32 bits)».
-2. Copiar `bin/x64/LPC1769.DLL` y `bin/x64/HCSR04.DLL` (o las de `bin/x86/` si es de 32 bits) a la carpeta de modelos de Proteus. Para saber cuál es: **System → System Settings → Simulation Model and Module Folders**. Suele ser `C:\ProgramData\Labcenter Electronics\Proteus 8 Professional\MODELS`.
+1. Ver si el Proteus es de 64 bits: en el Administrador de tareas, `PDS.EXE` sin «(32 bits)». Proteus 8.13 es de 32 bits.
+2. Copiar `bin/x86/LPC1769.DLL` (o la de `bin/x64/` si el Proteus es de 64 bits) a la carpeta de modelos de Proteus. Para saber cuál es: **System → System Settings → Simulation Model and Module Folders**. Suele ser `C:\ProgramData\Labcenter Electronics\Proteus 8 Professional\MODELS` o `C:\Program Files (x86)\Labcenter Electronics\Proteus 8 Professional\DATA\MODELS`.
 3. Reiniciar Proteus.
 
 La DLL no necesita nada más: sólo usa bibliotecas de Windows 10/11.
@@ -54,7 +58,7 @@ Se dibuja una vez y queda en una biblioteca del usuario. El mismo símbolo sirve
 
 ## 3. Crear el componente HCSR04
 
-Proteus tampoco trae el HC-SR04. `HCSR04.DLL` es su modelo: responde a cada pulso de TRIG de al menos 10 µs con un ECHO de 2·d / 343 m/s, 250 µs después. Si d supera 4 m, devuelve un ECHO de 38 ms, como el módulo real sin obstáculo.
+Proteus tampoco trae el HC-SR04. Su modelo está dentro de `LPC1769.DLL`, que crea un HC-SR04 cuando el nombre del dispositivo (Device Name) contiene `SR04`: responde a cada pulso de TRIG de al menos 10 µs con un ECHO de 2·d / 343 m/s, 250 µs después. Si d supera 4 m, devuelve un ECHO de 38 ms, como el módulo real sin obstáculo.
 
 - Pines: `TRIG` (Input), `ECHO` (Output), `DIST` (Input), `VCC` (Power), `GND` (Power).
 - Propiedades:
@@ -62,7 +66,7 @@ Proteus tampoco trae el HC-SR04. `HCSR04.DLL` es su modelo: responde a cada puls
 | Propiedad | Valor | Para qué sirve |
 |---|---|---|
 | `PRIMITIVE` | `MIXED,HCSR04` | (o `DIGITAL,HCSR04`) |
-| `MODDLL` | `HCSR04.DLL` | |
+| `MODDLL` | `LPC1769.DLL` | La misma DLL del microcontrolador; el Device Name tiene que contener `SR04` (por ejemplo `HCSR04`) |
 | `MMPERVOLT` | `100` | La tensión en `DIST` fija la distancia: 1 V = 100 mm |
 | `DISTANCE` | `200` | Distancia en mm, sin unidad, si `DIST` no está conectado o el modelo es `DIGITAL` |
 | `DELAY` | `250u` | Demora entre el fin de TRIG y el inicio de ECHO |
@@ -118,7 +122,7 @@ Valores obtenidos en Linux con el firmware de `Firmware/` sin modificar:
 | 2 | Osciloscopio en J6-39 | Pulso de TRIG de 11–12 µs cada 100 ms. Llega a 11 µs porque el bucle de espera arranca en cualquier punto de la cuenta de 1 µs del TIMER2; sigue por encima de los 10 µs que pide el sensor |
 | 3 | Enviar `SP=120` | `SP=120` y `PWM=100`: el error de 100 mm satura el PI; 1 kHz en J6-42 con duty 100 % |
 | 4 | Pote en 1,1 V (110 mm, nivel 110 mm) | `L=110` y `PWM=15` (1,51 %/mm × 10 mm); el duty sube lento por la integral |
-| 5 | LM35 a 46 °C | `T=46.0,FAN=1,ALM=1` en menos de 1 s; motor del ventilador, LED y buzzer encendidos |
+| 5 | LM35 a 46 °C | `T=45.7,FAN=1,ALM=1` en menos de 1 s (el divisor 1 kΩ / 220 kΩ del filtro baja la lectura); motor del ventilador, LED y buzzer encendidos |
 | 6 | LM35 a 39 °C | `FAN=0,ALM=0` (histéresis 45/40 °C) |
 | 7 | Pote en 0,4 V (40 mm, nivel 180 mm) | `L=180` y `PWM=0` (corte de seguridad) |
 | 8 | Desconectar ECHO | `ERR=1` y `PWM=0` después de 3 disparos sin eco |
@@ -140,8 +144,9 @@ La ventana «LPC1769 - registro del modelo» se abre desde **Debug** con la simu
 
 | Síntoma | Causa probable | Qué hacer |
 |---|---|---|
+| `mixed model HCSR04.DLL failed to authorize` (o `LPC1769.DLL`) y la simulación no arranca | Proteus 8.13 no autoriza una segunda DLL propia en la misma simulación: `authorize(0)` da falso | Usar `MODDLL=LPC1769.DLL` también en el HCSR04 (sección 3) |
 | `External model DLL "LPC1769.DLL" not found` (o `HCSR04.DLL`) | Carpeta equivocada o DLL de otra arquitectura | Revisar la carpeta de la sección 1; probar las DLL de `x86` |
-| Proteus rechaza `PRIMITIVE=MIXED` | La palabra clave del modelo mixto no es la que suponemos: no hay documentación pública | Usar `DIGITAL,LPC1769`; el ADC toma `ADC0`… `ADC7`. Avisar para corregirlo |
+| Proteus rechaza `PRIMITIVE=MIXED` | La palabra clave del modelo mixto no es la que suponemos: no hay documentación pública | Usar `DIGITAL,LPC1769`. En Proteus 8.13, con `PRIMITIVE=DIGITAL` se crea igual el modelo mixto: el ADC lee la tensión del pin si está conectado y `ADC0`… `ADC7` si no. Avisar para corregirlo |
 | `falta la propiedad PROGRAM` o `no se pudo abrir` | Ruta vacía o relativa | Usar ruta absoluta al `.axf` |
 | Las salidas valen 5 V en vez de 3,3 V | La interfaz digital-analógica de Proteus no toma la tensión de VDD | Avisar; mientras tanto no afecta la lógica, sí el cálculo de las corrientes de base y LED |
 | Simulación muy lenta | El intérprete corre a ~0,7 veces el tiempo real en una PC media, sin el resto del circuito | Subir `QUANTUM` a `50u` (las salidas salen 50 µs tarde) o simular tramos cortos |
@@ -168,4 +173,13 @@ cd Proteus/Modelo_LPC1769
 ./build.sh test   # además corre todas las pruebas
 ```
 
-Requiere llvm-mingw y el xPack de `arm-none-eabi-gcc` en `~/opt`; las rutas se cambian con las variables `MINGW` y `ARM`. `src/vsm/vsm.hpp` es una copia del encabezado de Labcenter publicada en GitHub (MockbaTheBorg/VSMModel), con el orden de las sobrecargas virtuales ajustado al de MSVC. La compatibilidad binaria con Proteus se verificó comparando las vtables y el código generado bajo los dos ABI (MSVC e Itanium).
+Requiere llvm-mingw y el xPack de `arm-none-eabi-gcc` en `~/opt`; las rutas se cambian con las variables `MINGW` y `ARM`. `src/vsm/vsm.hpp` es una copia del encabezado de Labcenter publicada en GitHub (MockbaTheBorg/VSMModel), con el orden de las sobrecargas virtuales ajustado al de MSVC. La compatibilidad binaria con Proteus se verificó comparando las vtables y el código generado bajo los dos ABI (MSVC e Itanium). En Windows sirven el llvm-mingw para Windows (mismas órdenes de `build.sh`, desde Git Bash) y el `arm-none-eabi-gcc` de MCUXpresso; las pruebas de `tests/` también compilan con ese clang como `.exe`.
+
+Para repetir la validación dentro de Proteus, en Windows y desde Git Bash:
+
+```
+cd Proteus/Modelo_LPC1769/tests/proteus
+./correr.sh       # usa bin/x86; imprime PASA o FALLA por prueba y el total
+```
+
+Usa `PROSPICE.EXE` de la instalación de Proteus y el `arm-none-eabi-gcc` de MCUXpresso (variables `PROSPICE` y `TOOL`). Un segundo LPC1769 simulado (`probador.c`) envía los comandos y cambia la temperatura y la distancia.

@@ -264,6 +264,8 @@ VOID LpcModel::setup(IINSTANCE *i, IDSIMCKT *ckt) {
         boot_outputs.clear();
         dsim_ready = false;
         callback_seen = false;
+        retry_logged = false;
+        chain_t = 0;
         stop_logged = false;
         reset_pin = nullptr;
         reset_level = true;
@@ -295,6 +297,7 @@ VOID LpcModel::setup(IINSTANCE *i, IDSIMCKT *ckt) {
 
 void LpcModel::start_chain(ABSTIME time) {
     chain++;
+    chain_t = time;
     dsim->setcallback(time + quantum, static_cast<IDSIMMODEL *>(this), chain);
 }
 
@@ -389,16 +392,30 @@ VOID LpcModel::accept(REALTIME, DOUBLE *rhs) {
     for (auto &r : apins) r.volts = rhs[r.node];
 }
 
-VOID LpcModel::simulate(ABSTIME time, DSIMMODES) {
+// Red de seguridad: si pasa un evento digital real sin que haya llegado ningún callback, la cadena se
+// vuelve a programar desde ese instante.
+void LpcModel::check_chain(ABSTIME time) {
+    if (!running || callback_seen || !dsim || time < chain_t + 3 * quantum) return;
+    if (!retry_logged) {
+        retry_logged = true;
+        logger.print("El primer callback no llegó: se reprograma la cadena de ejecución hasta que llegue");
+    }
+    start_chain(time);
+}
+
+// En simulación mixta Proteus también llama a simulate() con un modo no documentado (0x10) y el instante
+// al que quiere llegar el simulador analógico, antes de entregar los eventos digitales anteriores a ese
+// instante. No es un evento: si se lo tratara como tal, el reloj del modelo quedaría adelantado.
+static bool is_dsim_event(DSIMMODES mode) {
+    return ((int)mode & ~(DSIMBOOT | DSIMSETTLE | DSIMNORMAL | DSIMEND)) == 0;
+}
+
+VOID LpcModel::simulate(ABSTIME time, DSIMMODES mode) {
     try {
-        if (!soc || !dsim) return;
+        if (!soc || !dsim || !is_dsim_event(mode)) return;
         if (time > now_t) now_t = time;
         if (!dsim_ready) flush_boot(time);
-        if (running && !callback_seen && time >= 3 * quantum) {
-            logger.print("El primer callback no llegó: se reinicia la cadena de ejecución");
-            callback_seen = true;
-            start_chain(time);
-        }
+        check_chain(time);
         for (auto &r : dpins) {
             if (!r.pin) continue;
             while (!r.sched.empty() && r.sched.front().first <= time) { r.own = r.sched.front().second; r.sched.pop_front(); }
@@ -480,9 +497,9 @@ double SonarModel::current_mm() const {
     return distance_mm;
 }
 
-VOID SonarModel::simulate(ABSTIME time, DSIMMODES) {
+VOID SonarModel::simulate(ABSTIME time, DSIMMODES mode) {
     try {
-        if (!trig || !echo) return;
+        if (!trig || !echo || !is_dsim_event(mode)) return;
         if (!started) { echo->drivestate(time + 1, SLO); started = true; }
         bool lvl = ishigh(trig->istate());
         if (lvl == trig_level) return;
